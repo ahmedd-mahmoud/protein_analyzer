@@ -35,62 +35,70 @@ def get_ncbi_data(protein_id):
         print(f"    [ERROR] Could not fetch data from NCBI for {protein_id}. Error: {e}")
         return "Error", "Error"
 
-def get_uniprot_id_from_locus_tag(locus_tag):
-    """Maps a locus tag to a UniProt ID using the UniProt mapping service."""
-    print(f"  -> Querying UniProt for Locus Tag: {locus_tag}")
-    url = "https://rest.uniprot.org/idmapping/run"
-    params = {
-        "from": "Gene_Locus",
-        "to": "UniProtKB",
-        "ids": locus_tag
-    }
-    try:
-        response = requests.post(url, data=params)
-        response.raise_for_status()
-        job_id = response.json().get("jobId")
 
-        if not job_id:
-            return "Not Found"
+def get_alphafold_data(locus_tag: str) -> dict | None:
+    """
+    Fetches key data from the AlphaFold API using a locus tag.
 
-        # Poll for results
-        while True:
-            status_url = f"https://rest.uniprot.org/idmapping/status/{job_id}"
-            status_response = requests.get(status_url)
-            status_response.raise_for_status()
-            status_data = status_response.json()
-            if "results" in status_data or "jobStatus" in status_data and status_data["jobStatus"] != "RUNNING":
-                break
-            time.sleep(2) # Wait before checking again
-
-        results_url = f"https://rest.uniprot.org/idmapping/results/{job_id}"
-        results_response = requests.get(results_url)
-        results_response.raise_for_status()
-        results = results_response.json().get("results", [])
-
-        if results and "to" in results[0]:
-            return results[0]["to"]
-        return "Not Found"
-        
-    except requests.exceptions.RequestException as e:
-        print(f"    [ERROR] Could not map locus tag {locus_tag} to UniProt ID. Error: {e}")
-        return "Error"
-
-
-def get_alphafold_data(uniprot_id):
-    """Fetches key data from the AlphaFold API using a UniProt ID."""
-    if not uniprot_id or uniprot_id in ["Not Found", "Error"]:
+    This function uses a two-step process:
+    1. Uses the AlphaFold search API to find the UniProt ID corresponding to the locus tag.
+    2. Uses that UniProt ID to fetch the full prediction data.
+    """
+    if not locus_tag:
         return None
-    print(f"  -> Querying AlphaFold for UniProt ID: {uniprot_id}")
-    url = f"https://alphafold.ebi.ac.uk/api/prediction/{uniprot_id}"
+
+    # --- Step 1: Search for the locus tag to find the UniProt ID ---
+    print(f"\n  -> Searching AlphaFold for locus tag: '{locus_tag}'...")
+    url = "https://alphafold.ebi.ac.uk/api/search"
+    params = {
+        "q": f"(text:*{locus_tag} OR text:{locus_tag}*)",
+        "type": "main",
+        "start": 0,
+        "rows": 20
+    }
+    
+    uniprot_id = None
     try:
-        response = requests.get(url)
+        response = requests.get(url, params=params)
+        response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
+        
+        search_results = response.json()
+
+        if not search_results.get("docs"):
+            print(f"     [INFO] No search results found for locus tag '{locus_tag}'.")
+            return None
+            
+        # We assume the first hit is the most relevant one for a specific locus tag.
+        first_hit = search_results["docs"][0]
+        uniprot_id = first_hit.get("uniprotAccession")
+        
+        if not uniprot_id:
+            print(f"     [ERROR] Search successful, but could not extract UniProt ID for '{locus_tag}'.")
+            return None
+            
+        print(f"     Found corresponding UniProt ID: {uniprot_id}")
+
+    except requests.exceptions.RequestException as e:
+        print(f"     [ERROR] Could not perform search on AlphaFold for '{locus_tag}'. Error: {e}")
+        return None
+    except json.JSONDecodeError:
+        print(f"     [ERROR] Failed to decode JSON response from AlphaFold search for '{locus_tag}'.")
+        return None
+
+    # --- Step 2: Fetch the prediction data using the found UniProt ID ---
+    print(f"  -> Querying AlphaFold for prediction data for {uniprot_id}...")
+    prediction_url = f"https://alphafold.ebi.ac.uk/api/prediction/{uniprot_id}"
+    try:
+        response = requests.get(prediction_url)
         if response.status_code == 200:
-            return response.json()[0]  # The API returns a list, we want the first (and only) item
+            print(f"     AlphaFold data retrieved successfully for {uniprot_id}.")
+            # The API returns a list, we want the first (and only) item
+            return response.json()[0], uniprot_id
         else:
-            print(f"    [INFO] No AlphaFold entry found for {uniprot_id} (Status code: {response.status_code})")
+            print(f"     [INFO] No AlphaFold entry found for {uniprot_id} (Status code: {response.status_code})")
             return None
     except requests.exceptions.RequestException as e:
-        print(f"    [ERROR] Could not fetch data from AlphaFold for {uniprot_id}. Error: {e}")
+        print(f"     [ERROR] Could not fetch prediction data from AlphaFold for {uniprot_id}. Error: {e}")
         return None
 
 def download_file(url, save_path):
@@ -145,18 +153,20 @@ def main():
         # --- 4. AUTOMATED DATA FETCHING ---
         locus_tag, ncbi_protein_name = get_ncbi_data(protein_id)
         
-        uniprot_id = "Not Found"
-        if locus_tag not in ["Not Found", "Error"]:
-            uniprot_id = get_uniprot_id_from_locus_tag(locus_tag)
-        
         # Initialize AlphaFold data with default values
         aa_length = 'N/A'
         plddt = 'N/A'
 
-        af_data = get_alphafold_data(uniprot_id)
+        
+        
+        uniprot_id = "Not Found"
+        af_data = "Not Found"
+        if locus_tag not in ["Not Found", "Error"]:
+            af_data, uniprot_id = get_alphafold_data(locus_tag)
+        
         if af_data:
-            aa_length = af_data.get('uniprotSequenceLength', 'N/A')
-            plddt = af_data.get('plddt', 'N/A')
+            aa_length = af_data.get('sequenceEnd', 'N/A')
+            plddt = af_data.get('globalMetricValue', 'N/A')
             pdb_url = af_data.get('pdbUrl')
 
             # Download the PDB file if a URL was found
