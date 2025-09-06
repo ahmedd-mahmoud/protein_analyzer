@@ -1,11 +1,12 @@
 import os
 import re
 import time
+import json
 import requests
 import pandas as pd
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 from Bio import SeqIO
-
-# --- FUNCTIONS TO FETCH DATA FROM WEB APIs ---
 
 def get_ncbi_data(protein_id):
     """Fetches the locus tag and protein description from NCBI."""
@@ -36,16 +37,18 @@ def get_ncbi_data(protein_id):
         return "Error", "Error"
 
 
-def get_alphafold_data(locus_tag: str) -> dict | None:
+def get_alphafold_data(locus_tag: str):
     """
     Fetches key data from the AlphaFold API using a locus tag.
 
     This function uses a two-step process:
     1. Uses the AlphaFold search API to find the UniProt ID corresponding to the locus tag.
     2. Uses that UniProt ID to fetch the full prediction data.
+    
+    Returns a tuple: (prediction_data_dict, uniprot_id) or (None, None) on failure.
     """
     if not locus_tag:
-        return None
+        return None, None
 
     # --- Step 1: Search for the locus tag to find the UniProt ID ---
     print(f"\n  -> Searching AlphaFold for locus tag: '{locus_tag}'...")
@@ -66,7 +69,7 @@ def get_alphafold_data(locus_tag: str) -> dict | None:
 
         if not search_results.get("docs"):
             print(f"     [INFO] No search results found for locus tag '{locus_tag}'.")
-            return None
+            return None, None
             
         # We assume the first hit is the most relevant one for a specific locus tag.
         first_hit = search_results["docs"][0]
@@ -74,16 +77,16 @@ def get_alphafold_data(locus_tag: str) -> dict | None:
         
         if not uniprot_id:
             print(f"     [ERROR] Search successful, but could not extract UniProt ID for '{locus_tag}'.")
-            return None
+            return None, None
             
         print(f"     Found corresponding UniProt ID: {uniprot_id}")
 
     except requests.exceptions.RequestException as e:
         print(f"     [ERROR] Could not perform search on AlphaFold for '{locus_tag}'. Error: {e}")
-        return None
+        return None, None
     except json.JSONDecodeError:
         print(f"     [ERROR] Failed to decode JSON response from AlphaFold search for '{locus_tag}'.")
-        return None
+        return None, None
 
     # --- Step 2: Fetch the prediction data using the found UniProt ID ---
     print(f"  -> Querying AlphaFold for prediction data for {uniprot_id}...")
@@ -96,10 +99,31 @@ def get_alphafold_data(locus_tag: str) -> dict | None:
             return response.json()[0], uniprot_id
         else:
             print(f"     [INFO] No AlphaFold entry found for {uniprot_id} (Status code: {response.status_code})")
-            return None
+            return None, None
     except requests.exceptions.RequestException as e:
         print(f"     [ERROR] Could not fetch prediction data from AlphaFold for {uniprot_id}. Error: {e}")
-        return None
+        return None, None
+
+def get_species_type(uniprot_id):
+    """Fetches protein Clusters members number from AlphaFold."""
+    print(f"  -> Querying for protein Clusters members number: {uniprot_id}")
+    base_url = f"https://alphafold.ebi.ac.uk/api/cluster/members/{uniprot_id}"
+    params = {
+        "cluster_flag": "AFDB50/MMseqs2",
+        "records": 5,
+        "start": 0,
+        "sort_direction": "DESC",
+        "sort_column": "averagePlddt"
+    }
+    try:
+        response = requests.get(base_url, params=params)
+        response.raise_for_status()
+        result = response.json()
+        
+        return result['clusterTotal']
+    except requests.exceptions.RequestException as e:
+        print(f"    [ERROR] Could not fetch  protein Clusters members number for {uniprot_id}. Error: {e}")
+        return "Error"
 
 def download_file(url, save_path):
     """Downloads a file from a URL to a specified path."""
@@ -110,10 +134,10 @@ def download_file(url, save_path):
         with open(save_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print(f"    -> Successfully saved to: {os.path.basename(save_path)}")
+        print(f"     -> Successfully saved to: {os.path.basename(save_path)}")
         return True
     except requests.exceptions.RequestException as e:
-        print(f"    [ERROR] Failed to download file. Error: {e}")
+        print(f"     [ERROR] Failed to download file. Error: {e}")
         return False
 
 # --- MAIN SCRIPT ---
@@ -122,17 +146,15 @@ def main():
     """Main function to run the analysis pipeline."""
     # --- 1. SETUP YOUR FILE PATHS HERE ---
     # IMPORTANT: Use forward slashes '/' in your paths, even on Windows.
-    fasta_input_file = "D:/Career Learning/Randoms/file.fasta"
+    fasta_input_file = "D:/Career Learning/Randoms/file2.fasta"
     main_output_directory = "D:/Career Learning/Randoms/output"
 
     print("--- Starting Protein Analysis Pipeline ---")
 
-    # --- 2. PREPARE OUTPUT DIRECTORY AND DATA STORAGE ---
     os.makedirs(main_output_directory, exist_ok=True)
     all_proteins_data = []
     protein_counter = 0
 
-    # --- 3. PARSE FASTA FILE AND PROCESS EACH PROTEIN ---
     try:
         fasta_sequences = list(SeqIO.parse(fasta_input_file, "fasta"))
         print(f"Found {len(fasta_sequences)} proteins in the FASTA file.")
@@ -150,17 +172,16 @@ def main():
         protein_folder_path = os.path.join(main_output_directory, str(protein_counter))
         os.makedirs(protein_folder_path, exist_ok=True)
 
-        # --- 4. AUTOMATED DATA FETCHING ---
         locus_tag, ncbi_protein_name = get_ncbi_data(protein_id)
         
         # Initialize AlphaFold data with default values
         aa_length = 'N/A'
         plddt = 'N/A'
+        species_value = '' # Default to empty
+        alpha_missense_value = '' # Default to empty
 
-        
-        
         uniprot_id = "Not Found"
-        af_data = "Not Found"
+        af_data = None
         if locus_tag not in ["Not Found", "Error"]:
             af_data, uniprot_id = get_alphafold_data(locus_tag)
         
@@ -169,21 +190,45 @@ def main():
             plddt = af_data.get('globalMetricValue', 'N/A')
             pdb_url = af_data.get('pdbUrl')
 
+            # Process Species data
+            try:
+                # Navigate through the nested dictionary to get the hit count
+                similar_proteins_count = get_species_type(uniprot_id)
+                print(f"     Found {similar_proteins_count} similar proteins (AFDB50/MMseqs2).")
+                if similar_proteins_count >= 100:
+                    species_value = "General"
+                elif similar_proteins_count < 10:
+                    species_value = "Specific"
+                # Otherwise, it remains empty as initialized
+            except (KeyError, TypeError):
+                print("     [INFO] Could not find similar proteins count in AlphaFold data.")
+
+            # Process Alpha missense data
+            try:
+                # Check if the 'alphaMissense' list exists and is not empty
+                missense_annotations = af_data.get('amAnnotationsUrl')
+                if missense_annotations and isinstance(missense_annotations, list) and len(missense_annotations) > 0:
+                    alpha_missense_value = "Yes"
+                    print("     Found Alpha Missense annotations.")
+                else:
+                    print("     No Alpha Missense annotations found.")
+            except (KeyError, TypeError):
+                print("     [INFO] Could not find Alpha Missense data.")
+
             # Download the PDB file if a URL was found
             if pdb_url:
                 pdb_filename = f"{uniprot_id}.pdb"
                 pdb_save_path = os.path.join(protein_folder_path, pdb_filename)
                 download_file(pdb_url, pdb_save_path)
         
-        # --- 5. STORE ALL COLLECTED DATA ---
-        # Data for DALI, MTM, Interpro etc. are placeholders for you to fill in manually.
+        # Data for DALI, MTM, Interpro etc. are placeholders for you to fill in.
         protein_data = {
             'Folder': protein_counter,
             'Protein ID': protein_id,
             'Gene ID': locus_tag,
             'Uniport ID': uniprot_id,
             'AA': aa_length,
-            'PLDDT': plddt,
+            'PLDDT': plddt, # TODO: get plddt from protein domain or average of its domains plddts  
             'D.ID': '',
             'D.Z SCORE': '',
             'D.RMSD': '',
@@ -195,15 +240,14 @@ def main():
             'Interpro': 'MANUAL ENTRY: Run InterProScan and summarize results here.',
             'NCBI': ncbi_protein_name,
             'PDB E.value': 'MANUAL ENTRY: From AlphaFold website.',
-            'Species': 'MANUAL ENTRY: From AlphaFold website.',
-            'Alpha missense': 'MANUAL ENTRY: From AlphaFold website.'
+            'Species': species_value, 
+            'Alpha missense': alpha_missense_value
         }
         all_proteins_data.append(protein_data)
         
         # A short delay to be respectful to the servers
         time.sleep(1)
 
-    # --- 6. CREATE AND SAVE THE EXCEL FILE ---
     print("\n--- All proteins processed. Generating Excel report... ---")
     df = pd.DataFrame(all_proteins_data)
 
@@ -217,6 +261,19 @@ def main():
 
     excel_output_path = os.path.join(main_output_directory, "analysis_results.xlsx")
     df.to_excel(excel_output_path, index=False)
+
+    wb = load_workbook(excel_output_path)
+    ws = wb.active
+
+    # Define highlight style (red fill if plddt < 70)
+    highlight_fill = PatternFill(start_color="f1160a", end_color="f1160a", fill_type="solid")
+    
+    for row in ws.iter_rows(min_row=2):
+        plddt_cell = row[5]
+        if isinstance(plddt_cell.value, (int, float)) and plddt_cell.value < 70:
+            plddt_cell.fill = highlight_fill
+
+    wb.save(excel_output_path)
 
     print(f"--- Pipeline Finished! ---")
     print(f"Results saved to: {excel_output_path}")
