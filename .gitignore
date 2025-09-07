@@ -1,0 +1,7 @@
+.venv
+.vscode
+output
+*.fasta
+.env
+
+response.json
