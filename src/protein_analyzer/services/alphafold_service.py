@@ -44,17 +44,22 @@ class AlphaFoldService:
         Returns:
             AlphaFoldData: Object containing the fetched data or error information.
         """
-        if not locus_tag or locus_tag in ["Not Found", "Error"]:
+        if not locus_tag or not locus_tag.strip() or locus_tag.strip() in ["Not Found", "Error"]:
             return AlphaFoldData(error="Invalid locus tag provided")
+
+        locus_tag = locus_tag.strip()
+        logger.info(f"Processing AlphaFold data for locus tag: {locus_tag}")
 
         # Step 1: Search for UniProt ID
         uniprot_id = self._search_uniprot_id(locus_tag)
         if not uniprot_id:
+            logger.info(f"No UniProt ID found for locus tag: {locus_tag}")
             return AlphaFoldData(error="UniProt ID not found for locus tag")
 
         # Step 2: Get prediction data
         prediction_data = self._get_prediction_data(uniprot_id)
         if not prediction_data:
+            logger.info(f"No prediction data found for UniProt ID: {uniprot_id}")
             return AlphaFoldData(
                 uniprot_id=uniprot_id, error="Prediction data not found"
             )

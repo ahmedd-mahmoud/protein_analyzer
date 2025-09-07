@@ -4,9 +4,10 @@ import logging
 import sys
 from pathlib import Path
 
-# Add src directory to Python path
-src_path = Path(__file__).parent / "src"
-sys.path.insert(0, str(src_path))
+# Add src directory to Python path for development
+src_path = Path(__file__).parent.parent.parent / "src"
+if src_path.exists():
+    sys.path.insert(0, str(src_path))
 
 from protein_analyzer.gui.main_window import MainWindow
 from protein_analyzer.shared.exceptions import ProteinAnalyzerError

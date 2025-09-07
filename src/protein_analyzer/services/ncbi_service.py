@@ -38,6 +38,10 @@ class NCBIService:
         Raises:
             NCBIError: If the API request fails critically.
         """
+        if not protein_id or not protein_id.strip():
+            return NCBIData(locus_tag="Error", description="Error", error="Empty protein ID")
+            
+        protein_id = protein_id.strip()
         logger.info(f"Querying NCBI for protein ID: {protein_id}")
 
         params = {
@@ -54,6 +58,16 @@ class NCBIService:
             response.raise_for_status()
 
             content = response.text
+            
+            # Check if response indicates an error
+            if "Error occurred" in content or "Invalid uid" in content:
+                logger.warning(f"NCBI returned error for protein ID: {protein_id}")
+                return NCBIData(
+                    locus_tag="Not Found", 
+                    description="Not Found", 
+                    error="Invalid protein ID"
+                )
+            
             locus_tag = extract_locus_tag(content) or "Not Found"
             definition = extract_definition(content) or "Not Found"
 

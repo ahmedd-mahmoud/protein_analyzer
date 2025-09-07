@@ -19,33 +19,59 @@ A Windows desktop application for analyzing protein sequences using NCBI and Alp
 - Python 3.9 or later (for development)
 - Internet connection (for API access)
 
-## Installation for Development
+## Installation
+
+### Quick Start
+
+1. **Download or clone the repository**
+2. **Install Python 3.9 or later**
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **Test installation:**
+   ```bash
+   python test_installation.py
+   ```
+5. **Run the application:**
+   ```bash
+   python main.py
+   ```
+
+### Development Setup
 
 1. **Clone the repository:**
-
    ```bash
    git clone <repository-url>
    cd protein_analyzer
    ```
 
 2. **Create a virtual environment:**
-
    ```bash
    python -m venv .venv
-   .venv\Scripts\activate
+   .venv\Scripts\activate  # Windows
+   source .venv/bin/activate  # Linux/macOS
    ```
 
 3. **Install dependencies:**
-
    ```bash
    pip install -r requirements.txt
    pip install -r requirements-dev.txt  # For development tools
    ```
 
-4. **Run the application:**
+4. **Run tests:**
    ```bash
-   python main.py
+   python run_tests.py
    ```
+
+### Building Executable
+
+To create a standalone executable:
+```bash
+python build_executable.py
+```
+
+The executable will be created in the `dist/` directory.
 
 ## Usage
 
@@ -117,8 +143,25 @@ mypy src/
 bandit -r src/
 
 # Run tests
-pytest
+python run_tests.py
 ```
+
+### Troubleshooting
+
+If you encounter issues:
+1. Check the [Troubleshooting Guide](TROUBLESHOOTING.md)
+2. Run the installation test: `python test_installation.py`
+3. Check the log file: `protein_analyzer.log`
+4. Ensure all dependencies are installed correctly
+
+### Recent Improvements
+
+- Enhanced error handling and validation
+- Cross-platform compatibility
+- Better file encoding support
+- Improved GUI responsiveness
+- More robust API error handling
+- Comprehensive build and test scripts
 
 ### Project Structure
 

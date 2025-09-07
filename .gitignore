@@ -2,6 +2,9 @@
 .vscode
 output
 *.fasta
+!*.example.fasta
 .env
+*.log
 
+__pycache__
 response.json

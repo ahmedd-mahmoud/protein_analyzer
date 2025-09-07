@@ -114,9 +114,12 @@ class ProteinAnalyzer:
                     error_data = ProteinData(
                         folder=i,
                         protein_id=record.id,
+                        gene_id="Error",
+                        uniprot_id="Error",
                         ncbi_description=f"Error: {str(e)}",
                     )
                     all_protein_data.append(error_data)
+                    # Continue processing other proteins instead of failing completely
 
             # Generate Excel report
             self._update_progress(

@@ -53,9 +53,28 @@ class FileService:
         """
         try:
             logger.info(f"Reading FASTA file: {file_path}")
-            sequences = list(SeqIO.parse(file_path, "fasta"))
+            
+            # Try different encodings if UTF-8 fails
+            encodings = ['utf-8', 'latin-1', 'cp1252']
+            sequences = None
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as handle:
+                        sequences = list(SeqIO.parse(handle, "fasta"))
+                    break
+                except UnicodeDecodeError:
+                    continue
+                    
+            if sequences is None:
+                raise FileProcessingError(f"Could not decode file with any supported encoding")
+                
+            if not sequences:
+                raise FileProcessingError(f"No valid sequences found in FASTA file")
+                
             logger.info(f"Successfully read {len(sequences)} sequences from FASTA file")
             return sequences
+            
         except FileNotFoundError as e:
             error_msg = f"FASTA file not found: {file_path}"
             logger.error(error_msg)
@@ -86,16 +105,32 @@ class FileService:
         filename = sanitize_filename(f"{uniprot_id}{PDB_EXTENSION}")
         save_path = os.path.join(output_directory, filename)
 
+        # Skip if file already exists and is not empty
+        if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+            logger.info(f"PDB file already exists: {filename}")
+            return True
+
         try:
             logger.info(f"Downloading PDB file from: {url}")
             
-            response = requests.get(url, stream=True)
+            response = requests.get(url, stream=True, timeout=30)
             response.raise_for_status()
+
+            # Check content type
+            content_type = response.headers.get('content-type', '')
+            if 'text/plain' not in content_type and 'application/octet-stream' not in content_type:
+                logger.warning(f"Unexpected content type for PDB file: {content_type}")
 
             with open(save_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=self.chunk_size):
                     if chunk:
                         f.write(chunk)
+
+            # Verify file was downloaded and is not empty
+            if os.path.getsize(save_path) == 0:
+                os.remove(save_path)
+                logger.error(f"Downloaded PDB file is empty: {filename}")
+                return False
 
             logger.info(f"Successfully saved PDB file to: {filename}")
             return True
@@ -169,18 +204,30 @@ class FileService:
                 start_color="f1160a", end_color="f1160a", fill_type="solid"
             )
 
-            # Find PLDDT column (should be column F, index 5)
-            plddt_column_index = 5  # 0-based index for column F (PLDDT)
+            # Find PLDDT column dynamically
+            plddt_column_index = None
+            for idx, cell in enumerate(worksheet[1]):  # Header row
+                if cell.value == "PLDDT":
+                    plddt_column_index = idx
+                    break
+
+            if plddt_column_index is None:
+                logger.warning("PLDDT column not found in Excel file")
+                return
 
             for row in worksheet.iter_rows(min_row=2):  # Skip header row
-                plddt_cell = row[plddt_column_index]
-                
-                # Check if the value is numeric and below threshold
-                if (
-                    isinstance(plddt_cell.value, (int, float))
-                    and plddt_cell.value < PLDDT_HIGHLIGHT_THRESHOLD
-                ):
-                    plddt_cell.fill = highlight_fill
+                if plddt_column_index < len(row):
+                    plddt_cell = row[plddt_column_index]
+                    
+                    # Check if the value is numeric and below threshold
+                    try:
+                        if plddt_cell.value and plddt_cell.value != "N/A":
+                            plddt_value = float(plddt_cell.value)
+                            if plddt_value < PLDDT_HIGHLIGHT_THRESHOLD:
+                                plddt_cell.fill = highlight_fill
+                    except (ValueError, TypeError):
+                        # Skip non-numeric values
+                        continue
 
             workbook.save(excel_path)
             logger.info("Excel formatting applied successfully")

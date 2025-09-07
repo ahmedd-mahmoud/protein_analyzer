@@ -419,14 +419,18 @@ class MainWindow:
         # Re-enable start button
         self.start_button.config(state="normal")
         
-        # Show completion message
+        # Show completion message with better formatting
+        output_dir = os.path.dirname(result_path)
         result = messagebox.askyesno(
             "Analysis Complete",
-            f"Analysis completed successfully!\n\nResults saved to:\n{result_path}\n\nWould you like to open the output directory?"
+            f"Analysis completed successfully!\n\n"
+            f"Results saved to:\n{result_path}\n\n"
+            f"Output directory:\n{output_dir}\n\n"
+            f"Would you like to open the output directory?"
         )
         
         if result:
-            self._open_output_directory(os.path.dirname(result_path))
+            self._open_output_directory(output_dir)
 
     def _handle_analysis_error(self, error_msg: str) -> None:
         """Handle analysis error."""
@@ -465,9 +469,23 @@ class MainWindow:
             directory (str): Directory path to open.
         """
         try:
-            os.startfile(directory)  # Windows-specific
+            import subprocess
+            import platform
+            
+            system = platform.system()
+            if system == "Windows":
+                os.startfile(directory)
+            elif system == "Darwin":  # macOS
+                subprocess.run(["open", directory])
+            else:  # Linux and others
+                subprocess.run(["xdg-open", directory])
+                
         except Exception as e:
             self._log_message(f"Failed to open directory: {e}")
+            messagebox.showwarning(
+                "Cannot Open Directory", 
+                f"Could not open the output directory automatically.\n\nPath: {directory}"
+            )
 
     def _update_status(self, status: str) -> None:
         """

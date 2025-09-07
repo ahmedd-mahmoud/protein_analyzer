@@ -22,15 +22,32 @@ def validate_fasta_file(file_path: str) -> bool:
     if not file_path:
         return False
         
-    path = Path(file_path)
-    
-    if not path.exists():
-        return False
+    try:
+        path = Path(file_path)
         
-    if not path.is_file():
+        if not path.exists():
+            return False
+            
+        if not path.is_file():
+            return False
+            
+        # Check file extension
+        if path.suffix.lower() not in FASTA_EXTENSIONS:
+            return False
+            
+        # Check if file is readable and not empty
+        if path.stat().st_size == 0:
+            return False
+            
+        # Try to read first few lines to validate FASTA format
+        with open(path, 'r', encoding='utf-8') as f:
+            first_line = f.readline().strip()
+            if not first_line.startswith('>'):
+                return False
+                
+        return True
+    except (OSError, PermissionError, UnicodeDecodeError):
         return False
-        
-    return path.suffix.lower() in FASTA_EXTENSIONS
 
 
 def validate_output_directory(directory_path: str) -> bool:
