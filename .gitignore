@@ -8,3 +8,8 @@ output
 
 __pycache__
 response.json
+
+dist
+build
+distribution
+file_split

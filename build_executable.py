@@ -27,7 +27,7 @@ def build_executable():
     
     # Define the build command
     cmd = [
-        "pyinstaller",
+        sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--windowed",
         "--name=ProteinAnalyzer",
@@ -39,6 +39,9 @@ def build_executable():
         "--hidden-import=pandas",
         "--hidden-import=openpyxl",
         "--hidden-import=tkinter",
+        "--hidden-import=tkinter.filedialog",
+        "--hidden-import=tkinter.messagebox",
+        "--hidden-import=tkinter.ttk",
         "--clean",
         "main.py"
     ]
